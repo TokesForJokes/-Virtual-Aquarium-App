@@ -1,0 +1,219 @@
+import 'dart:math';
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+void main() {
+  runApp(VirtualAquariumApp());
+}
+
+class VirtualAquariumApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Virtual Aquarium',
+      theme: ThemeData(primarySwatch: Colors.blue),
+      home: AquariumScreen(),
+    );
+  }
+}
+
+class AquariumScreen extends StatefulWidget {
+  @override
+  _AquariumScreenState createState() => _AquariumScreenState();
+}
+
+class _AquariumScreenState extends State<AquariumScreen> with TickerProviderStateMixin {
+  List<Fish> fishList = [];
+  Color selectedColor = Colors.blue;
+  double selectedSpeed = 1.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPreferences();
+  }
+
+  @override
+  void dispose() {
+    for (var fish in fishList) {
+      fish.controller.dispose();
+    }
+    super.dispose();
+  }
+
+  void _addFish() {
+    if (fishList.length < 10) {
+      final controller = AnimationController(
+        duration: _calculateAnimationDuration(selectedSpeed),
+        vsync: this,
+      )..repeat(reverse: true); // Continuously repeat animation without stopping.
+
+      final fish = Fish(
+        color: selectedColor,
+        speed: selectedSpeed,
+        controller: controller,
+      );
+
+      setState(() {
+        fishList.add(fish);
+      });
+    }
+  }
+
+  Duration _calculateAnimationDuration(double speed) {
+    // Use exponential scaling for drastic speed changes.
+    double adjustedDuration = pow(2, 10 - speed).toDouble();
+    return Duration(milliseconds: (adjustedDuration * 100).toInt());
+  }
+
+  void _loadPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    double speed = prefs.getDouble('fishSpeed') ?? 1.0;
+    int colorValue = prefs.getInt('fishColor') ?? Colors.blue.value;
+
+    Color loadedColor = (colorValue == Colors.blue.value || colorValue == Colors.red.value)
+        ? Color(colorValue)
+        : Colors.blue;
+
+    setState(() {
+      selectedSpeed = speed;
+      selectedColor = loadedColor;
+    });
+  }
+
+  void _savePreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('fishCount', fishList.length);
+    await prefs.setDouble('fishSpeed', selectedSpeed);
+    await prefs.setInt('fishColor', selectedColor.value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Virtual Aquarium'),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.save),
+            onPressed: _savePreferences,
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: Container(
+              width: 300,
+              height: 300,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.blue, width: 3),
+              ),
+              child: Stack(
+                children: fishList.map((fish) => fish.buildFish()).toList(),
+              ),
+            ),
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              ElevatedButton(
+                onPressed: _addFish,
+                child: Text('Add Fish'),
+              ),
+              DropdownButton<Color>(
+                value: (selectedColor == Colors.blue || selectedColor == Colors.red)
+                    ? selectedColor
+                    : Colors.blue,
+                items: [
+                  DropdownMenuItem(
+                    value: Colors.blue,
+                    child: Text('Blue'),
+                  ),
+                  DropdownMenuItem(
+                    value: Colors.red,
+                    child: Text('Red'),
+                  ),
+                ],
+                onChanged: (color) {
+                  if (color != null) {
+                    setState(() {
+                      selectedColor = color;
+                    });
+                  }
+                },
+              ),
+              Slider(
+                min: 1.0,
+                max: 10.0,
+                divisions: 9,
+                value: selectedSpeed,
+                onChanged: (value) {
+                  setState(() {
+                    selectedSpeed = value;
+                    // Adjust the duration of all animations in real-time.
+                    for (var fish in fishList) {
+                      fish.controller.duration = _calculateAnimationDuration(selectedSpeed);
+                    }
+                  });
+                },
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class Fish {
+  final Color color;
+  final double speed;
+  final AnimationController controller;
+  late Animation<Offset> animation;
+
+  Fish({required this.color, required this.speed, required this.controller}) {
+    // Create an animation that moves the fish across the entire container.
+    animation = Tween<Offset>(
+      begin: Offset(
+        Random().nextDouble(),
+        Random().nextDouble(),
+      ),
+      end: Offset(
+        Random().nextDouble(),
+        Random().nextDouble(),
+      ),
+    ).animate(CurvedAnimation(
+      parent: controller,
+      curve: Curves.linear,
+    ));
+
+    // Ensure the animation keeps moving back and forth.
+    controller.addStatusListener((status) {
+      if (status == AnimationStatus.completed || status == AnimationStatus.dismissed) {
+        // Change the direction randomly upon hitting a boundary.
+        controller.repeat(reverse: true);
+      }
+    });
+  }
+
+  Widget buildFish() {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, child) {
+        return Positioned(
+          top: animation.value.dy * 280, // Adjusted to fit within container bounds.
+          left: animation.value.dx * 280,
+          child: Container(
+            width: 20,
+            height: 20,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
